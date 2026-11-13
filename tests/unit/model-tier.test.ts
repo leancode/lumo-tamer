@@ -32,6 +32,7 @@ describe('modelToTier', () => {
         expect(modelToTier('lumo')).toBe('auto');
         expect(modelToTier('lumo-lite')).toBe('lumo-lite');
         expect(modelToTier('lumo-max')).toBe('lumo-max');
+        expect(modelToTier('apertus-15')).toBe('apertus-15');
         expect(modelToTier('something-else')).toBe('auto');
     });
 });

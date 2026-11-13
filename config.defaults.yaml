@@ -107,6 +107,7 @@ server:
   #   lumo      -> Proton routes automatically
   #   lumo-lite -> Lumo 2.0 Lite (fast, everyday)
   #   lumo-max  -> Lumo 2.0 Max (high-performance)
+  #   apertus-15 -> Apertus 1.5 (the open Swiss model)
   # Tier used when a request omits the model field (auto = lumo / Proton routes):
   defaultModelTier: "auto"
   # Models advertised on /v1/models and accepted in the "model" field.
@@ -115,6 +116,7 @@ server:
     - "lumo"
     - "lumo-lite"
     - "lumo-max"
+    - "apertus-15"
 
   # Thinking / reasoning mode (Lumo 2.0).
   reasoning:
