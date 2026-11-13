@@ -270,6 +270,54 @@ describe('StreamingToolDetector', () => {
     });
   });
 
+  describe('inline tool calls', () => {
+    const call = '{\n  "name": "user:get_weather",\n  "arguments": {"city": "Paris"}\n}';
+
+    it('detects a prefixed tool call written straight after text on the same line', () => {
+      const detector = new StreamingToolDetector();
+      const { allText, allToolCalls } = processAll(detector, ['Kitchen light is on; checking the weather now.' + call]);
+
+      expect(allToolCalls).toHaveLength(1);
+      expect(allToolCalls[0].name).toBe('get_weather');
+      expect(allToolCalls[0].arguments).toEqual({ city: 'Paris' });
+      expect(allText).toBe('Kitchen light is on; checking the weather now.');
+    });
+
+    it('detects it for every chunk split', () => {
+      const message = 'Checking now.' + call + ' Done.';
+
+      for (let a = 1; a < message.length; a++) {
+        for (let b = a + 1; b <= Math.min(message.length, a + 8); b++) {
+          const chunks = [message.slice(0, a), message.slice(a, b), message.slice(b)].filter(Boolean);
+          const { allText, allToolCalls } = processAll(new StreamingToolDetector(), chunks);
+
+          expect(allToolCalls, `split at ${a},${b}`).toHaveLength(1);
+          expect(allText, `split at ${a},${b}`).toBe('Checking now. Done.');
+        }
+      }
+    });
+
+    it('leaves inline JSON without the tool prefix alone', () => {
+      const message = 'For example: {"name": "Bob", "age": 4} is a person.';
+      for (let a = 1; a < message.length; a++) {
+        const { allText, allToolCalls } = processAll(new StreamingToolDetector(), [message.slice(0, a), message.slice(a)]);
+
+        expect(allToolCalls, `split at ${a}`).toHaveLength(0);
+        expect(allText, `split at ${a}`).toBe(message);
+      }
+    });
+
+    it('passes text with braces through unchanged for every chunk split', () => {
+      const message = 'function f() { return { name: "x", list: [1, 2] }; } // {"name" is quoted here';
+      for (let a = 1; a < message.length; a++) {
+        const { allText, allToolCalls } = processAll(new StreamingToolDetector(), [message.slice(0, a), message.slice(a)]);
+
+        expect(allToolCalls, `split at ${a}`).toHaveLength(0);
+        expect(allText, `split at ${a}`).toBe(message);
+      }
+    });
+  });
+
   describe('non-tool content', () => {
     it('passes non-tool JSON through as text', () => {
       const detector = new StreamingToolDetector();

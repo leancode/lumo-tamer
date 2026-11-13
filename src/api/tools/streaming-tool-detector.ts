@@ -105,6 +105,26 @@ export class StreamingToolDetector {
   private processNormalState(result: ProcessResult): void {
     // Look for code fence start
     const fenceMatch = this.pendingText.match(/```(?:json)?\s*\n?/);
+
+    // A tool call written inline, straight after other text on the same line
+    // ("Turning it off now.{"name": "user:..."). Only recognised by the
+    // configured tool prefix, so ordinary JSON in prose is left alone.
+    const inlineIdx = this.findInlineToolCall();
+    if (inlineIdx !== -1 && (!fenceMatch || fenceMatch.index === undefined || inlineIdx < fenceMatch.index)) {
+      const lineStart = this.pendingText.match(/(?:^|\n)\s*(\{[\n\s]*")/);
+      const lineStartIdx = lineStart && lineStart.index !== undefined
+        ? lineStart.index + (lineStart[0].length - lineStart[1].length)
+        : -1;
+      if (lineStartIdx === -1 || inlineIdx < lineStartIdx) {
+        logger.debug(`Inline tool call opener found: ${this.showSnippet(inlineIdx)}`);
+        result.textToEmit += this.pendingText.slice(0, inlineIdx);
+        this.pendingText = this.pendingText.slice(inlineIdx);
+        this.state = 'in_raw_json';
+        this.jsonTracker.reset();
+        return;
+      }
+    }
+
     if (fenceMatch && fenceMatch.index !== undefined) {
 
       logger.debug(`Code block opener found: ${this.showSnippet(fenceMatch.index)}`);
@@ -139,7 +159,12 @@ export class StreamingToolDetector {
     }
 
     // No pattern found - emit all but keep last few chars for partial match detection
-    const keepChars = 10; // Keep enough for "```" pattern
+    let keepChars = 10; // Keep enough for "```" pattern
+    // Also keep a trailing "{..." that may still grow into an inline tool call.
+    const lastBrace = this.pendingText.lastIndexOf('{');
+    if (lastBrace !== -1 && this.isPartialInlineOpener(this.pendingText.slice(lastBrace))) {
+      keepChars = Math.max(keepChars, this.pendingText.length - lastBrace);
+    }
     if (this.pendingText.length > keepChars) {
       result.textToEmit += this.pendingText.slice(0, -keepChars);
       this.pendingText = this.pendingText.slice(-keepChars);
@@ -151,6 +176,43 @@ export class StreamingToolDetector {
       // this.pendingText = '';
       // BUG: last 3 letters are dropped
     }
+  }
+
+  /** The parts of an inline tool call opener: `{ "name" : "<prefix>` (null = optional whitespace). */
+  private inlineOpenerParts(): Array<string | null> | null {
+    const prefix = getCustomToolsConfig().prefix;
+    // Without a prefix there is nothing to tell a tool call from other JSON.
+    if (!prefix) return null;
+    return ['{', null, '"name"', null, ':', null, `"${prefix}`];
+  }
+
+  /** Index of an inline tool call opener in pendingText, or -1. */
+  private findInlineToolCall(): number {
+    const parts = this.inlineOpenerParts();
+    if (!parts) return -1;
+    const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const pattern = new RegExp(parts.map((part) => (part === null ? '\\s*' : escape(part))).join(''));
+    const match = pattern.exec(this.pendingText);
+    return match ? match.index : -1;
+  }
+
+  /** Whether text is the beginning of an inline tool call opener that more chunks could complete. */
+  private isPartialInlineOpener(text: string): boolean {
+    const parts = this.inlineOpenerParts();
+    if (!parts || text.length > 200) return false;
+    let i = 0;
+    for (const part of parts) {
+      if (part === null) {
+        while (i < text.length && /\s/.test(text[i])) i++;
+        continue;
+      }
+      for (const char of part) {
+        if (i >= text.length) return true;
+        if (text[i] !== char) return false;
+        i++;
+      }
+    }
+    return true;
   }
 
   /**
