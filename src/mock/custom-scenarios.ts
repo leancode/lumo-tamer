@@ -56,6 +56,23 @@ function lastTurnWithRole(turns: Turn[], role: Turn['role']): Turn | undefined {
 }
 
 export const customScenarios: Record<string, ScenarioGenerator> = {
+    jsonOutput: async function* (options) {
+        // Simulates Lumo answering a structured-output request the way it often
+        // does: JSON inside a Markdown code fence. `sawFormatInstruction` reports
+        // whether the format instruction reached the last user turn.
+        const turns = getTurns(options);
+        const lastUser = lastTurnWithRole(turns, Role.User);
+        const sawFormatInstruction = /Respond with a single (valid )?JSON/.test(lastUser?.content ?? '');
+        const reply = '```json\n' + JSON.stringify({ mocked: true, sawFormatInstruction }) + '\n```\n';
+        yield formatSSEMessage({ type: 'ingesting', target: 'message' });
+        // Small uneven chunks, so fence markers get split across them.
+        for (let i = 0, count = 0; i < reply.length; i += 5, count++) {
+            yield formatSSEMessage({ type: 'token_data', target: 'message', count, content: reply.slice(i, i + 5) });
+            await delay(5);
+        }
+        yield formatSSEMessage({ type: 'done' });
+    },
+
     imageInput: async function* (options) {
         // Simulates image understanding: describes what the request carried so tests
         // and manual runs can verify images made it through the whole pipeline.

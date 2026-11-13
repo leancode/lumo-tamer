@@ -25,6 +25,14 @@ import {
 import { sendInvalidRequest, sendServerError } from '../../error-handler.js';
 import { deterministicUUID } from '../../../app/id-generator.js';
 import { ImageInputError, contentHasImages, resolveRemoteImageUrls } from '../../images.js';
+import {
+  ResponseFormatError,
+  parseChatResponseFormat,
+  buildResponseFormatInstruction,
+  cleanJsonOutput,
+  JsonOutputFilter,
+  type ResponseFormat,
+} from '../../response-format.js';
 
 /** Extract tool_call_id from a role: 'tool' message. */
 function extractToolCallId(msg: unknown): string | undefined {
@@ -105,6 +113,16 @@ export function createChatCompletionsRouter(deps: EndpointDependencies): Router 
         );
       }
 
+      let responseFormat: ResponseFormat | undefined;
+      try {
+        responseFormat = parseChatResponseFormat(request.response_format);
+      } catch (error) {
+        if (error instanceof ResponseFormatError) {
+          return sendInvalidRequest(res, error.message, error.param, error.code);
+        }
+        throw error;
+      }
+
       // ===== Generate conversation ID for persistence =====
       // Chat Completions has no conversation parameter per OpenAI spec.
       // We use deriveIdFromUser to track conversations for Proton sync.
@@ -154,7 +172,7 @@ export function createChatCompletionsRouter(deps: EndpointDependencies): Router 
       }
 
       // Add to queue and process
-      await handleChatRequest(res, deps, request, turns, conversationId, request.stream ?? false, instructions, injectInto);
+      await handleChatRequest(res, deps, request, turns, conversationId, request.stream ?? false, instructions, injectInto, responseFormat);
     } catch (error) {
       logger.error('Error processing chat completion:');
       logger.error(error);
@@ -173,7 +191,8 @@ async function handleChatRequest(
   conversationId: ConversationId | undefined,
   streaming: boolean,
   instructions: string | undefined,
-  injectInstructionsInto: 'first' | 'last'
+  injectInstructionsInto: 'first' | 'last',
+  responseFormat?: ResponseFormat
 ): Promise<void> {
   const id = generateChatCompletionId();
   const created = Math.floor(Date.now() / 1000);
@@ -201,10 +220,17 @@ async function handleChatRequest(
   let resultUsage: ReturnType<typeof buildOpenAIUsage> = null;
   let toolCalls: typeof processor.toolCallsEmitted | undefined;
 
+  // Structured output: strip the code fence Lumo wraps JSON in, as it streams.
+  const jsonFilter = responseFormat ? new JsonOutputFilter() : null;
+  const emitText = (text: string) => {
+    if (!text) return;
+    accumulatedText += text;
+    emitter?.emitContentDelta(text);
+  };
+
   const processor = createStreamingToolProcessor(ctx.hasCustomTools, {
     emitTextDelta(text) {
-      accumulatedText += text;
-      emitter?.emitContentDelta(text);
+      emitText(jsonFilter ? jsonFilter.push(text) : text);
     },
     emitToolCall(callId, tc) {
       emitter?.emitToolCallDelta(callId, tc.name, tc.arguments);
@@ -224,6 +250,7 @@ async function handleChatRequest(
           requestTitle: ctx.requestTitle,
           instructions,
           injectInstructionsInto,
+          lastUserTurnSuffix: responseFormat ? buildResponseFormatInstruction(responseFormat) : undefined,
           modelTier: tier,
           enableReasoning,
           onReasoning: surfaceThinking && emitter
@@ -239,6 +266,11 @@ async function handleChatRequest(
         reasoningContent = result.reasoning;
       }
       processor.finalize();
+      if (jsonFilter) {
+        emitText(jsonFilter.finalize());
+        // A complete reply can also be cleaned of prose around the JSON.
+        if (!emitter) accumulatedText = cleanJsonOutput(accumulatedText);
+      }
       resultUsage = buildOpenAIUsage(result.usage, result.promptLength ?? 0, result.completionLength ?? 0);
       persistTitle(result, deps, conversationId);
       toolCalls = processor.toolCallsEmitted.length > 0 ? processor.toolCallsEmitted : undefined;
@@ -246,7 +278,8 @@ async function handleChatRequest(
       persistAssistantTurn(
         deps,
         conversationId,
-        result.message,
+        // Persist what the client received, so the history it sends back matches.
+        jsonFilter ? { ...result.message, content: accumulatedText } : result.message,
         mapToolCallsForPersistence(processor.toolCallsEmitted)
       );
     } catch (error) {

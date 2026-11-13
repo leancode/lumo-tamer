@@ -34,6 +34,12 @@ import {
   type ToolCallForPersistence,
 } from '../shared.js';
 import { sendServerError } from '../../error-handler.js';
+import {
+  buildResponseFormatInstruction,
+  cleanJsonOutput,
+  JsonOutputFilter,
+  type ResponseFormat,
+} from '../../response-format.js';
 
 // ── Output building ────────────────────────────────────────────────
 
@@ -144,9 +150,7 @@ function createCompletedResponse(
     store: request.store ?? false,
     temperature: request.temperature ?? 1.0,
     text: {
-      format: {
-        type: 'text',
-      },
+      format: echoTextFormat(request.text),
     },
     tool_choice: request.tools && request.tools.length > 0 ? 'auto' : 'none',
     tools: request.tools ?? [],
@@ -166,6 +170,15 @@ function createCompletedResponse(
   };
 }
 
+/** Echo the request's `text.format` in the response object (default: text). */
+function echoTextFormat(text: unknown): { type: string; [key: string]: unknown } {
+  const format = (text as { format?: unknown } | null | undefined)?.format;
+  if (typeof format === 'object' && format !== null && typeof (format as { type?: unknown }).type === 'string') {
+    return format as { type: string; [key: string]: unknown };
+  }
+  return { type: 'text' };
+}
+
 // ── Unified handler ────────────────────────────────────────────────
 
 export async function handleRequest(
@@ -177,6 +190,7 @@ export async function handleRequest(
   streaming: boolean,
   instructions: string | undefined,
   injectInstructionsInto: 'first' | 'last',
+  responseFormat?: ResponseFormat,
 ): Promise<void> {
   const id = generateResponseId();
   const itemId = generateItemId();
@@ -232,10 +246,16 @@ export async function handleRequest(
   } else {
     // Normal flow: call Lumo
     let nextOutputIndex = reasoningItemId ? 2 : 1;
+    // Structured output: strip the code fence Lumo wraps JSON in, as it streams.
+    const jsonFilter = responseFormat ? new JsonOutputFilter() : null;
+    const emitText = (text: string) => {
+      if (!text) return;
+      accumulatedText += text;
+      emitter?.emitOutputTextDelta(itemId, messageOutputIndex, 0, text);
+    };
     const processor = createStreamingToolProcessor(ctx.hasCustomTools, {
       emitTextDelta(text) {
-        accumulatedText += text;
-        emitter?.emitOutputTextDelta(itemId, messageOutputIndex, 0, text);
+        emitText(jsonFilter ? jsonFilter.push(text) : text);
       },
       emitToolCall(callId, tc) {
         emitter?.emitFunctionCallEvents(id, callId, tc.name, JSON.stringify(tc.arguments), nextOutputIndex++);
@@ -248,6 +268,7 @@ export async function handleRequest(
           requestTitle: ctx.requestTitle,
           instructions,
           injectInstructionsInto,
+          lastUserTurnSuffix: responseFormat ? buildResponseFormatInstruction(responseFormat) : undefined,
           modelTier: tier,
           enableReasoning,
           onReasoning:
@@ -269,11 +290,22 @@ export async function handleRequest(
       }
 
       processor.finalize();
+      if (jsonFilter) {
+        emitText(jsonFilter.finalize());
+        // A complete reply can also be cleaned of prose around the JSON.
+        if (!emitter) accumulatedText = cleanJsonOutput(accumulatedText);
+      }
       resultUsage = buildOpenAIUsage(result.usage, result.promptLength ?? 0, result.completionLength ?? 0);
       persistTitle(result, deps, conversationId);
       toolCallsForPersist = mapToolCallsForPersistence(processor.toolCallsEmitted);
 
-      persistAssistantTurn(deps, conversationId, result.message, toolCallsForPersist);
+      persistAssistantTurn(
+        deps,
+        conversationId,
+        // Persist what the client received, so the history it sends back matches.
+        jsonFilter ? { ...result.message, content: accumulatedText } : result.message,
+        toolCallsForPersist,
+      );
     } catch (error) {
       logger.error({ error: String(error) }, 'Response error');
       if (emitter) {

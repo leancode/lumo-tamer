@@ -89,6 +89,9 @@ export interface OpenAIChatRequest {
   // Thinking mode: 'none' disables; 'low'/'medium'/'high' enable reasoning.
   reasoning_effort?: 'none' | 'low' | 'medium' | 'high' | null;
   tools?: OpenAITool[];
+  // Structured output: { type: 'text' | 'json_object' | 'json_schema', json_schema?: {...} }.
+  // Validated at request time (see response-format.ts).
+  response_format?: unknown;
   user?: string;
   // Custom extension for conversation persistence
   conversation_id?: string;
@@ -176,6 +179,9 @@ export interface OpenAIResponseRequest {
   max_tokens?: number;
   store?: boolean;
   metadata?: Record<string, string>;
+  // Structured output: { format: { type: 'text' | 'json_object' | 'json_schema', name?, schema? } }.
+  // Validated at request time (see response-format.ts).
+  text?: unknown;
   tools?: any[];
   // Continuation from previous response (stateless mode)
   previous_response_id?: string;
@@ -243,6 +249,7 @@ export interface OpenAIResponse {
   text: {
     format: {
       type: string;
+      [key: string]: unknown;
     };
   };
   tool_choice: string;

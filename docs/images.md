@@ -110,7 +110,7 @@ Relevant code: `src/api/images.ts` (decoding and validation), `src/api/message-c
 
 - Images are not persisted or synced: conversation storage keeps the message text only. Lumo sees exactly the messages of the current request, so clients keep image context by resending the full history (the OpenAI convention).
 - No resizing. Send images at a sensible resolution; see the limits above.
-- `detail` has no effect; `response_format` (JSON schema output) is not forwarded.
+- `detail` has no effect.
 - Image generation and editing tools are not exposed.
 - The CLI has no image support yet.
 - Availability of vision depends on your Proton plan and model tier.
@@ -129,4 +129,4 @@ genai:
 
 Frigate sends several frames per description (3 to 5 JPEG images of a few hundred KB each). The defaults (`bodyLimit: 6mb`, `maxImageSize: 4mb`) cover this; raise `server.bodyLimit` if you configure more frames or larger snapshots.
 
-Review descriptions ask for JSON output and pass a `response_format`, which lumo-tamer ignores. Lumo usually follows the JSON instruction in the prompt; Frigate strips code fences before parsing.
+Review descriptions ask for JSON output with a `response_format` (JSON schema). lumo-tamer passes the schema on to Lumo as an instruction and strips the code fence from the reply; see [Structured Output](../README.md#structured-output).

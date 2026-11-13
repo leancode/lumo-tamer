@@ -34,7 +34,7 @@ import {
 import { buildChatCompletionsBody, LUMO_CHAT_ENDPOINT, type LumoCompletionTarget } from './v2-body.js';
 import { V2StreamProcessor } from './v2-stream.js';
 import { getInstructionsConfig, getLogConfig, getConfigMode, getCustomToolsConfig, getEnableWebSearch } from '../app/config.js';
-import { injectInstructionsIntoTurns } from './instructions.js';
+import { appendToLastUserTurn, injectInstructionsIntoTurns } from './instructions.js';
 import { countImages, prepareImageTurns, stripImagesForTitle, turnsHaveImages } from './images.js';
 import { NativeToolCallProcessor, type NativeToolCallResult } from '../api/tools/native-tool-call-processor.js';
 import { postProcessTitle } from '@lumo/lib/lumo-api-client/utils.js';
@@ -313,6 +313,7 @@ export class LumoClient {
             requestTitle = false,
             instructions,
             injectInstructionsInto = 'first',
+            lastUserTurnSuffix,
             modelTier = this.defaultOptions?.modelTier ?? 'auto',
             enableReasoning = this.defaultOptions?.enableReasoning ?? false,
             onReasoning = this.defaultOptions?.onReasoning,
@@ -351,9 +352,10 @@ export class LumoClient {
         }
 
         // Inject instructions at the last moment (kept out of persisted turns).
-        const turnsWithInstructions = instructions
+        const turnsWithProjectInstructions = instructions
             ? injectInstructionsIntoTurns(preparedTurns, instructions, injectInstructionsInto)
             : preparedTurns;
+        const turnsWithInstructions = appendToLastUserTurn(turnsWithProjectInstructions, lastUserTurnSuffix);
 
         // Title generation is a separate, concurrent, non-fatal completion.
         // Only at the top level: a bounce must not launch its own title request.

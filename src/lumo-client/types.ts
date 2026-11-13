@@ -157,6 +157,11 @@ export interface LumoClientOptions {
     instructions?: string;
     /** Where to inject instructions: 'first' or 'last' user turn. Default: 'first'. */
     injectInstructionsInto?: 'first' | 'last';
+    /**
+     * Text appended to the last user turn before sending (not persisted), e.g. the
+     * instruction for a requested output format.
+     */
+    lastUserTurnSuffix?: string;
     /** Model tier (Lite/Max). Defaults to 'auto'. */
     modelTier?: LumoModelTier;
     /** Thinking mode: request reasoning (reasoning_effort:'high'). */

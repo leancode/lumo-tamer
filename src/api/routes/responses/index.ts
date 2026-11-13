@@ -11,6 +11,7 @@ import { trackCustomToolCompletion } from '../../tools/call-id.js';
 import { sendInvalidRequest, sendServerError } from '../../error-handler.js';
 import { deterministicUUID } from '../../../app/id-generator.js';
 import { ImageInputError, resolveRemoteImageUrls } from '../../images.js';
+import { ResponseFormatError, parseResponsesTextFormat, type ResponseFormat } from '../../response-format.js';
 
 import type { ConversationId } from '../../../conversations/index.js';
 
@@ -134,6 +135,16 @@ export function createResponsesRouter(deps: EndpointDependencies): Router {
       }
 
       // ===== Build instructions (injected in LumoClient, not persisted) =====
+      let responseFormat: ResponseFormat | undefined;
+      try {
+        responseFormat = parseResponsesTextFormat(request.text);
+      } catch (error) {
+        if (error instanceof ResponseFormatError) {
+          return sendInvalidRequest(res, error.message, error.param, error.code);
+        }
+        throw error;
+      }
+
       const instructions = buildInstructions(request.tools, request.instructions);
       const { injectInto } = getServerInstructionsConfig();
 
@@ -157,7 +168,7 @@ export function createResponsesRouter(deps: EndpointDependencies): Router {
       }
 
       // ===== STEP 6: Add to queue and process =====
-      await handleRequest(res, deps, request, turns, conversationId, request.stream ?? false, instructions, injectInto);
+      await handleRequest(res, deps, request, turns, conversationId, request.stream ?? false, instructions, injectInto, responseFormat);
     } catch (error) {
       logger.error('Error processing response:');
       logger.error(error);

@@ -28,6 +28,7 @@ lumo-tamer is a lightweight local proxy that talks to Proton's Lumo API using th
 - OpenAI-compatible API server with experimental tool support.
 - Select the Lumo 2.0 model tier (Lite/Max) and thinking mode per request, via the OpenAI `model` and `reasoning_effort` fields.
 - Image input (vision): send pictures with your messages, e.g. from Frigate's Generative AI features.
+- Structured output: ask for JSON with the OpenAI `response_format` field.
 - Interactive CLI, let Lumo help you execute commands, read, create and edit files.
 - Sync your conversations with Proton to access them on https://lumo.proton.me or in mobile apps.
 
@@ -242,6 +243,12 @@ server:
 ```
 
 See [Image Input](docs/images.md) for formats, limits, Frigate setup and examples.
+
+### Structured Output
+
+Clients can ask for JSON with `response_format` on `/v1/chat/completions` (`json_object`, or `json_schema` with a schema) and with `text.format` on `/v1/responses`. There is nothing to configure.
+
+Lumo has no JSON mode of its own, so lumo-tamer appends an instruction (and the schema) to the last user message, and removes the Markdown code fence Lumo tends to wrap JSON in. It works on a best-effort basis: the reply is not validated against the schema, so clients should still parse defensively. In a non-streamed reply, prose around the JSON is removed as well; a streamed reply only loses its code fence.
 
 ### Instructions
 

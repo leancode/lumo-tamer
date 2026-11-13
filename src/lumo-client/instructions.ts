@@ -59,6 +59,26 @@ export function findLastUserTurnIndex(turns: Turn[]): number {
  *
  * Instructions are prepended as [Project instructions: ...] wrapper.
  */
+/**
+ * Append text to the last user turn (after a blank line).
+ *
+ * Used for per-request instructions that belong with the user's question
+ * rather than with the project instructions, e.g. a requested output format.
+ * Like injectInstructionsIntoTurns, this is applied just before sending and
+ * never reaches the persisted turns.
+ */
+export function appendToLastUserTurn(turns: Turn[], text: string | undefined): Turn[] {
+  if (!text) return turns;
+  const targetIdx = findLastUserTurnIndex(turns);
+  if (targetIdx === -1) return turns;
+
+  return turns.map((turn, index) =>
+    index === targetIdx
+      ? { ...turn, content: turn.content ? `${turn.content}\n\n${text}` : text }
+      : turn
+  );
+}
+
 export function injectInstructionsIntoTurns(
   turns: Turn[],
   instructions: string | undefined,
